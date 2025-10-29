@@ -1,212 +1,75 @@
-# 飞牛OS存储空间自动化扩容工具
+# 飞牛NAS存储扩展脚本汇总指南
 
-## 📖 项目简介
+## 概览
+- **目标** 提供 `fnos_storage_expand/` 下全部自动化脚本的入口命令及功能速览，便于快速选择合适方案。
+- **目录**
+  - `fnos_kuorong/`：飞牛OS在线扩容与备份工具包。
+  - `flynas_partition_manager/`：通用分区管理与调整助手。
+  - `flynas_storage_creator/`：系统分区腾挪空间并创建新存储分区的自动化方案。
 
-本项目提供了一套完整的飞牛OS存储空间扩容解决方案，适用于ESXi虚拟化环境。当您在ESXi中扩容虚拟磁盘后，可以使用这些工具自动完成飞牛OS系统内的存储空间扩容。
+## 使用前准备
+- **权限** 需具备 `root` 或 `sudo` 权限。
+- **环境** 建议提前创建快照或完整数据备份，确认主机磁盘已在虚拟化平台扩容。
+- **执行** 首次运行前为脚本赋予执行权限：
+  ```bash
+  chmod +x <script_name>.sh
+  ```
 
-## 📁 文件说明
+## 脚本速查表
+| 序号 | 脚本路径 | 主调用命令 | 核心功能 | 推荐场景 |
+|------|----------|------------|----------|----------|
+| 1 | `fnos_kuorong/fnos_storage_expand.sh` | `sudo ./fnos_storage_expand.sh` | 在线检测、扩容、备份恢复一体化 | ESXi 已扩容虚拟磁盘，需要在线扩展 `vol1` 等数据卷 |
+| 2 | `flynas_partition_manager/flynas_partition_manager_v3_complete.sh` | `sudo ./flynas_partition_manager_v3_complete.sh` | 智能识别分区、支持任意分区间空间调整与对齐修复 | 需在多分区、多文件系统场景下灵活调整空间 |
+| 3 | `flynas_storage_creator/flynas_create_storage_v3_ultimate.sh` | `sudo ./flynas_create_storage_v3_ultimate.sh` | 释放系统分区空间并创建新的 `vda2` 存储分区 | 只有单盘环境，需要为飞牛NAS创建新的存储卷 |
 
-| 文件名 | 描述 |
-|--------|------|
-| `fnos_storage_expand.sh` | 主要的自动化扩容脚本（集成备份恢复功能） |
-| `fnos_storage_expand_guide.md` | 详细的操作指南和文档 |
-| `README.md` | 项目说明文件（本文件） |
+## 详细说明
 
-## 🚀 快速开始
+### `fnos_kuorong/` 在线扩容工具
+- **主脚本** `fnos_storage_expand.sh`
+- **关键命令**
+  ```bash
+  sudo ./fnos_storage_expand.sh              # 进入交互式菜单
+  sudo ./fnos_storage_expand.sh --dry-run    # 仅检测磁盘/LVM状态
+  sudo ./fnos_storage_expand.sh --backup     # 进入备份管理菜单
+  sudo ./fnos_storage_expand.sh --backup create   # 创建当前配置备份
+  sudo ./fnos_storage_expand.sh --backup restore <路径>  # 恢复指定备份
+  ```
+- **功能要点**
+  - **自动检测** 智能识别挂载点、LVM 结构及可扩容空间。
+  - **安全守护** 在扩容前自动备份分区表、LVM 配置与 `fstab`。
+  - **多文件系统支持** 针对 `ext4`、`xfs`、`btrfs` 等场景自动选择扩容策略。
+  - **日志追踪** 执行日志保存在 `/var/log/fnos_storage_expand_*.log`，备份位于 `/tmp/fnos_expand_backup_*`。
+- **适用人群** 需要在业务不中断情况下扩容飞牛OS存储卷，并希望保留完整回滚能力的管理员。
 
-### 1. 准备工作
-- 确保已在ESXi中完成虚拟磁盘扩容
-- 创建虚拟机快照作为备份
-- 通过SSH连接到飞牛OS系统
+### `flynas_partition_manager/` 通用分区管理器
+- **主脚本** `flynas_partition_manager_v3_complete.sh`
+- **关键命令**
+  ```bash
+  sudo ./flynas_partition_manager_v3_complete.sh
+  ```
+- **功能要点**
+  - **分区盘点** 自动罗列物理/逻辑分区、文件系统类型、挂载点与使用率。
+  - **灵活操作** 支持在任意源、目标分区间移动空间，可利用未分配空间或删除分区。
+  - **对齐修复** 识别扇区间隙，提供一键扩展到磁盘末尾的对齐修复流程。
+  - **两阶段执行** 通过 systemd 服务在重启后完成高风险操作，配合 `/var/lib/flynas_partition_state_v3` 状态文件确保可追踪。
+- **适用人群** 需对飞牛NAS或其他 Linux 主机执行复杂分区规划、解决扇区对齐问题或跨文件系统调整空间的运维人员。
 
-### 2. 获取脚本
-```bash
-# 方法一：从GitHub克隆项目
-git clone https://github.com/3377/fnos_storage_expand.git
-cd fnos_storage_expand
+### `flynas_storage_creator/` 存储分区创建方案
+- **主脚本** `flynas_create_storage_v3_ultimate.sh`
+- **关键命令**
+  ```bash
+  sudo ./flynas_create_storage_v3_ultimate.sh          # 启动流程并配置释放空间
+  sudo ./flynas_create_storage_v3_ultimate.sh --cleanup # 执行完成后的清理
+  ```
+- **功能要点**
+  - **空间评估** 自动计算系统分区已用与可释放容量，提醒最小保留空间（>=13GB）。
+  - **自动化流程** 创建 systemd 一次性服务在重启后执行离线缩小、`gdisk` 调整分区、创建 `vda2` 并扩展文件系统。
+  - **配置修复** 检测 UUID 变化后自动更新 `/etc/fstab` 与 `GRUB`，重启后若进入 GRUB 救援模式需要按指南手动恢复。
+  - **日志定位** 准备与执行日志分别写入 `/var/log/flynas_storage_v3.log` 和 `/var/log/flynas_resize_exec.log`。
+- **适用人群** 希望远程（SSH）完成系统盘减容并新建存储分区、无法使用 LiveCD 但可以接受一次重启和手动 GRUB 恢复的场景。
 
-# 方法二：直接下载脚本文件
-wget https://raw.githubusercontent.com/3377/fnos_storage_expand/main/fnos_storage_expand.sh
-
-# 方法三：使用scp上传（在本地执行）
-scp fnos_storage_expand.sh root@your-fnos-ip:/root/
-```
-
-### 3. 设置权限
-```bash
-# 在飞牛OS系统中执行
-chmod +x fnos_storage_expand.sh
-```
-
-### 4. 执行扩容
-
-#### 方法一：交互式菜单（推荐）
-```bash
-# 运行脚本，显示功能菜单
-sudo ./fnos_storage_expand.sh
-
-# 或者直接显示菜单
-sudo ./fnos_storage_expand.sh --menu
-```
-
-脚本会显示功能菜单：
-1. **存储空间扩容** - 执行自动化扩容流程
-2. **备份恢复管理** - 管理系统备份和恢复
-3. **干运行检测** - 查看当前磁盘状态和可扩容空间
-4. **退出**
-
-#### 方法二：直接执行扩容
-```bash
-# 预检查（查看当前磁盘状态和可扩容空间）
-sudo ./fnos_storage_expand.sh --dry-run
-
-# 执行交互式扩容（跳过菜单）
-sudo ./fnos_storage_expand.sh --menu
-# 然后选择选项1进行扩容
-```
-
-#### 方法三：备份恢复操作
-```bash
-# 创建备份
-sudo ./fnos_storage_expand.sh --backup create
-
-# 列出备份
-sudo ./fnos_storage_expand.sh --backup list
-
-# 恢复备份
-sudo ./fnos_storage_expand.sh --backup restore /path/to/backup
-
-# 进入备份管理菜单
-sudo ./fnos_storage_expand.sh --backup
-```
-
-## 📋 使用场景
-
-### 典型使用流程
-1. **ESXi扩容** - 在ESXi管理界面中扩容虚拟磁盘
-2. **创建快照** - 为虚拟机创建快照备份
-3. **SSH连接** - 连接到飞牛OS系统
-4. **执行脚本** - 运行自动化扩容脚本
-5. **验证结果** - 确认扩容成功
-
-### 支持的配置
-- **虚拟化平台**: VMware ESXi 6.0+
-- **操作系统**: 飞牛OS (fnOS) 各版本
-- **存储配置**: LVM管理的存储空间
-- **文件系统**: btrfs、ext4、ext3、xfs
-
-## ⚠️ 重要提醒
-
-### 操作前必读
-1. **数据备份** - 务必创建虚拟机快照或完整数据备份
-2. **测试环境** - 建议先在测试环境中验证
-3. **维护窗口** - 在业务低峰期进行操作
-4. **权限确认** - 确保具有root权限
-
-### 风险说明
-- 分区操作存在数据丢失风险
-- 不当操作可能导致系统无法启动
-- 建议由有经验的系统管理员执行
-
-## 🔧 故障排除
-
-### 常见问题
-1. **权限不足** - 使用 `sudo` 执行脚本
-2. **磁盘未扩容** - 确认ESXi中已完成磁盘扩容
-3. **LVM未检测** - 检查存储空间是否使用LVM管理
-4. **脚本执行失败** - 查看日志文件排查错误
-5. **LVM扩容失败** - 检查逻辑卷路径是否正确
-6. **分区类型错误** - 确认GPT/MBR分区表类型
-
-### 紧急恢复
-如果扩容失败：
-```bash
-# 恢复备份
-sudo ./fnos_storage_expand.sh --backup restore /tmp/fnos_backup_YYYYMMDD_HHMMSS
-
-# 或者在ESXi中恢复虚拟机快照
-```
-
-## 📚 详细文档
-
-完整的操作指南请参考：[fnos_storage_expand_guide.md](./fnos_storage_expand_guide.md)
-
-该文档包含：
-- 详细的背景说明
-- 分步操作指南
-- 手动操作方法
-- 故障排除方案
-- 常见问题解答
-
-## 🛠️ 脚本功能
-
-### 主扩容脚本 (fnos_storage_expand.sh)
-- ✅ 自动检测存储配置
-- ✅ 智能识别磁盘和分区
-- ✅ 支持GPT和MBR分区表
-- ✅ 支持多种文件系统
-- ✅ 完整的备份机制
-- ✅ 详细的操作日志
-- ✅ 进度显示和确认提示
-- ✅ LVM逻辑卷路径智能识别
-- ✅ 集成备份恢复功能
-- ✅ 交互式菜单界面
-- ✅ 命令行参数支持
-
-### 集成的备份恢复功能
-- ✅ 系统配置备份
-- ✅ LVM配置备份
-- ✅ 分区表备份
-- ✅ 备份完整性验证
-- ✅ 一键恢复功能
-- ✅ 备份管理功能
-- ✅ 交互式和命令行模式
-
-## 📞 技术支持
-
-### 获取帮助
-```bash
-# 查看脚本帮助
-./fnos_storage_expand.sh --help
-
-# 查看备份恢复帮助
-./fnos_storage_expand.sh --backup --help
-```
-
-### 日志文件
-- 扩容日志：`/var/log/fnos_storage_expand_*.log`
-- 备份目录：`/tmp/fnos_expand_backup_*`
-
-### 联系方式
-如遇到问题，请提供：
-1. 错误信息和日志文件
-2. 系统配置信息
-3. 操作步骤描述
-
-## 📝 版本信息
-
-- **当前版本**: v1.1
-- **更新日期**: 2024年12月
-- **兼容性**: 飞牛OS各版本，ESXi 6.0+
-
-### 更新日志
-#### v1.1 (当前版本)
-- 🔧 修复LVM逻辑卷路径构建问题
-- 🔧 添加GPT分区表支持
-- 🔧 改进数据获取和验证机制
-- 🔧 优化错误处理和日志输出
-- 🔧 增强脚本稳定性和兼容性
-
-#### v1.0
-- 🎉 初始发布版本
-- ✅ 支持自动化存储扩容
-- ✅ 包含完整的备份恢复机制
-- ✅ 提供详细的操作文档
-
-## 📄 许可证
-
-本项目仅供学习和研究使用。使用者需自行承担操作风险。
-
----
-
-**⚠️ 免责声明**: 此工具涉及系统底层存储配置，存在数据丢失风险。请务必在操作前创建完整备份，并在测试环境中验证。使用者需自行承担操作风险。 
+## 建议流程
+- **选择脚本** 根据上表确认需求：在线扩容选 `fnos_storage_expand.sh`，复杂分区调整选 `flynas_partition_manager_v3_complete.sh`，单盘腾挪创建新存储选 `flynas_create_storage_v3_ultimate.sh`。
+- **执行前** 复核磁盘扩容、LVM 状态及备份方案，必要时多读对应子目录下的 README 了解限制与风险。
+- **执行中** 关注脚本输出与日志，严格按照提示输入 `YES`/`yes` 等确认信息。
+- **执行后** 验证 `lsblk`、`df -h`、飞牛NAS 管理界面中的容量变化，并在需要时运行 `--cleanup` 或查看状态文件确保流程完结。
